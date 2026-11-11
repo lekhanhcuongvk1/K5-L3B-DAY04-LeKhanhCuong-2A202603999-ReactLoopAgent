@@ -1,9 +1,31 @@
 """Các provider cùng một interface. Không chứa agent loop."""
 import json
 import os
+from pathlib import Path
 import urllib.error
 import urllib.request
 import uuid
+
+
+def load_local_env():
+    """Load local .env entries without overriding variables already set in the shell."""
+    path = Path(__file__).resolve().with_name('.env')
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        if key.startswith('$env:'):
+            key = key[5:].strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key.replace('_', '').isalnum():
+            os.environ.setdefault(key, value)
+
+
+load_local_env()
 
 CONFIG = {
     'openai': ('OPENAI_API_KEY', 'https://api.openai.com/v1/chat/completions'),
@@ -17,7 +39,7 @@ CONFIG = {
 def post_json(url, headers, payload):
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', **headers})
     try:
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with urllib.request.urlopen(req, timeout=150) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         # Do not print response bodies: they may contain account or request data.
@@ -41,6 +63,10 @@ class Provider:
         # One Provider instance represents one conversation/run.
         self.session_id = str(uuid.uuid4()) if name == 'opencode-go' else None
         key_name, self.url = CONFIG[name]
+        if name == 'anthropic':
+            base_url = os.getenv('ANTHROPIC_BASE_URL', '').strip().rstrip('/')
+            if base_url:
+                self.url = f'{base_url}/v1/messages'
         self.key = os.getenv(key_name)
         if not self.key:
             raise ValueError(f'Thiếu {key_name}; xem README.md.')
