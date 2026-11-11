@@ -21,8 +21,20 @@ def run_agent(question, provider, tools, max_steps=6):
     usage = []
 
     for step in range(1, max_steps + 1):
-        response = provider.complete(messages, SCHEMAS)
-        message = response['message']
+        try:
+            response = provider.complete(messages, SCHEMAS)
+            message = response['message']
+        except Exception as exc:
+            error = f'{type(exc).__name__}: {str(exc)[:200]}'
+            trace.append({'event': 'provider_error', 'step': step, 'error': error})
+            return {
+                'status': 'error',
+                'answer': '',
+                'trace': trace,
+                'usage': usage,
+                'error': error,
+            }
+
         calls = response.get('calls', [])
         finish = response.get('finish')
 
@@ -39,8 +51,25 @@ def run_agent(question, provider, tools, max_steps=6):
 
         if calls:
             for call in calls:
-                arguments = json.loads(call['arguments'])
-                result = tools.execute(call['name'], arguments)
+                raw_arguments = call.get('arguments', '')
+                try:
+                    arguments = json.loads(raw_arguments)
+                except (json.JSONDecodeError, TypeError) as exc:
+                    arguments = raw_arguments
+                    result = {
+                        'ok': False,
+                        'error': 'INVALID_ARGUMENTS',
+                        'message': f'Arguments không phải JSON hợp lệ: {str(exc)[:160]}',
+                    }
+                else:
+                    try:
+                        result = tools.execute(call['name'], arguments)
+                    except Exception as exc:
+                        result = {
+                            'ok': False,
+                            'error': type(exc).__name__,
+                            'message': str(exc)[:200],
+                        }
                 trace.append({
                     'event': 'tool',
                     'step': step,
@@ -68,7 +97,8 @@ def run_agent(question, provider, tools, max_steps=6):
             'answer': message.get('content') or '',
             'trace': trace,
             'usage': usage,
-            'error': f'Model dừng với finish={finish!r}.',
+            'error': ('Model output bị cắt do vượt giới hạn.' if finish == 'length'
+                      else f'Model dừng với finish={finish!r}.'),
         }
 
     return {
