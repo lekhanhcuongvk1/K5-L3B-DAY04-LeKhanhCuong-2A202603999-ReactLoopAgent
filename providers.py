@@ -46,6 +46,8 @@ def post_json(url, headers, payload):
         raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
+    except TimeoutError as exc:
+        raise RuntimeError('Provider không phản hồi trước thời hạn; hãy thử lại sau.') from exc
 
 
 class Provider:
