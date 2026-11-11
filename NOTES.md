@@ -44,27 +44,42 @@ từ liên kết rồi tiếp tục gọi `get_incident_details` trước khi k�
 
 ## 3. Thay đổi đã thực hiện
 
-- Sửa gì, ở đâu: **Chưa thực hiện tại thời điểm chốt `eval_before.json`**. Thay đổi
-  dự kiến là bổ sung chỉ dẫn trong `SYSTEM_PROMPT` của `agent.py`: khi tool result
-  dẫn tới một incident khác và URL chứa ID, phải điều tra tiếp ID đó trong giới hạn
-  `max_steps`; không được tuyên bố không thể đọc nếu tool hiện tại hỗ trợ ID đó.
+- Sửa gì, ở đâu: Trong `agent.py`, bổ sung chỉ dẫn vào `SYSTEM_PROMPT`: khi update
+  của một incident dẫn tới incident khác thuộc provider được hỗ trợ, agent phải tách
+  ID từ URL và đọc incident liên quan trước khi kết luận thiếu dữ liệu. Prompt cũng
+  yêu cầu báo rõ partial failure và không biến timeout thành trạng thái dịch vụ.
+  Ngoài ra, vòng lặp lưu URL từ mọi lần `get_incident_details` thành công. Trước khi
+  trả `completed`, nếu final answer thiếu một URL đã quan sát, agent ghi event
+  `validation_missing_source`, yêu cầu model sửa câu trả lời trong budget còn lại;
+  nếu hết `max_steps` thì trả `max_steps` thay vì chấp nhận answer thiếu nguồn.
 - Vì sao chọn thay đổi này: H1 là case thấp nhất (60/100), lỗi có bằng chứng trực
   tiếp trong trace và thay đổi nhắm đúng vào thiếu sót multi-step investigation.
-  Sau khi implement sẽ chạy unit tests và eval lần 2 để kiểm tra cải thiện cũng như
-  regression ở các case khác.
+  Evidence gate còn đáp ứng contract kiểm tra nguồn trong `tests/test_validation.py`.
+  Sau thay đổi, toàn bộ 40 unit tests pass. Ở eval lần 2, H1 gọi thêm
+  `get_incident_details(github, xr3myzj7ms51)` tại step 2, sau đó dẫn đủ URL của ba
+  incident và tăng từ 60 lên 95 điểm.
 
 ## 4. So sánh hai lần chạy
 
 | Chỉ số | `eval_before.json` | `eval_after.json` |
 |---|---|---|
-| Điểm tổng | 93.32/100 | Chưa chạy |
-| Điểm case đã chọn | 60/100 | Chưa chạy |
-| Số model calls | 55 calls trên 22 case; riêng H1 có 2 calls | Chưa chạy |
-| Token, chi phí nếu có | Agent: 57,561 input + 13,456 output; judge: 87,021 input + output; provider không trả chi phí | Chưa chạy |
+| Điểm tổng | 93.32/100 | 95.05/100 |
+| Điểm case đã chọn | 60/100 | 95/100 |
+| Số model calls | 55 calls trên 22 case; riêng H1 có 2 calls | 57 calls trên 22 case; riêng H1 có 4 calls |
+| Token, chi phí nếu có | Agent: 57,561 input + 13,456 output; judge: 87,021 input + output; provider không trả chi phí | Agent: 84,717 input + 15,449 output; judge: 82,963 input + output; provider không trả chi phí |
 
-- Lỗi đã giải quyết: Chưa kết luận; cần `eval_after.json` sau khi implement thay đổi.
-- Lỗi còn lại hoặc mới xuất hiện: H1 chưa theo liên kết tới incident gộp, thiếu
-  nguyên nhân/ảnh hưởng GitHub và không đạt yêu cầu nhiều model steps.
+- Lỗi đã giải quyết: H1 đã theo liên kết từ `h02n9572mx9y` tới incident gộp
+  `xr3myzj7ms51`, lấy được nguyên nhân và phạm vi ảnh hưởng GitHub, đối chiếu với
+  Cloudflare mà không suy luận nguyên nhân chung. H1 tăng **35 điểm** (60 → 95).
+  H7 cũng tăng 73 → 100 nhờ báo đúng timeout Cloudflare thay vì khẳng định trạng
+  thái khi thiếu dữ liệu. Điểm tổng tăng **1.73 điểm** (93.32 → 95.05).
+- Lỗi còn lại hoặc mới xuất hiện: A2 còn quy trạng thái degraded của component cho
+  riêng incident FedRAMP quá chắc chắn (100 → 91). A5 nói tool chỉ trả 5 incident
+  nhưng chưa phân biệt rõ 11 incident khớp với 5 mục được hiển thị (100 → 93).
+  H4 giảm 91 → 81 vì chất lượng bài thơ không ổn định; case này không gọi tool và
+  mức giảm chủ yếu phản ánh biến thiên output/judge, không liên quan evidence gate.
+  Ở H1, judge vẫn lưu ý update resolved của `xr3myzj7ms51` bị cắt và nên nêu giới
+  hạn này ngay trong phần nguyên nhân.
 
 ## 5. Giới hạn
 
